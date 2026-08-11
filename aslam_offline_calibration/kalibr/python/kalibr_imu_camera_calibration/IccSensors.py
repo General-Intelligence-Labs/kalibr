@@ -17,6 +17,11 @@ import numpy as np
 import pylab as pl
 import scipy.optimize
 
+#: Extra coefficient-buffer margin, on top of timeOffsetPadding, for the pose
+#: lookups in addCameraErrorTerms. Covers the drift of the time-offset design
+#: variable between buffer construction and evaluation.
+_EXTRA_POSE_BUFFER_S = 0.05
+
 
 def initCameraBagDataset(bagfile, topic, from_to, freq, perform_synchronization):
     print("Initializing camera rosbag dataset reader:")
@@ -348,7 +353,20 @@ class IccCamera():
             if frameTimeScalar <= poseSplineDv.spline().t_min() or frameTimeScalar >= poseSplineDv.spline().t_max():
                 continue
             
-            T_w_b = poseSplineDv.transformationAtTime(frameTime, timeOffsetPadding, timeOffsetPadding)
+            #Ask for a WIDER coefficient buffer than the padding alone. The
+            #buffer is sized once from the expression's value at construction
+            #(frameTime +- timeOffsetPadding, snapped to knots -> 70 ms at 100
+            #knots/s), but the expression carries the live cameraTimeToImuTimeDv
+            #and is re-evaluated later, in threaded blocks. Once that design
+            #variable has moved, the evaluation can land outside its own buffer
+            #-- by one knot interval in practice -- and trip
+            #  BSplineExpressions.cpp:447 assert(_bufferTmin <= _time < _bufferTmax)
+            #which aborts before the optimizer takes a step. The failures sit in
+            #the INTERIOR of the spline, not at its ends, so the [t_min, t_max]
+            #guard above cannot prevent them; widening the buffer, as the assert
+            #message suggests, does.
+            _bufferPadding = timeOffsetPadding + _EXTRA_POSE_BUFFER_S
+            T_w_b = poseSplineDv.transformationAtTime(frameTime, _bufferPadding, _bufferPadding)
             T_b_w = T_w_b.inverse()
 
             #calibration target coords to camera N coords
