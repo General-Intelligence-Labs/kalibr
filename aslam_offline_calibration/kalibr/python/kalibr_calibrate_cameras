@@ -388,6 +388,21 @@ def main():
                         if len(batches_to_check)>1:
                             progress_filter.sample()
                             
+            #final pass over every accepted view with a near-zero SVD cutoff. The
+            #incremental estimator never updates directions below its truncation
+            #tolerance (1e-6 above), so a weak early view can set them wrongly for
+            #good and make the result depend on the shuffled view order. 1e-12
+            #still truncates numerically null directions. The printed std-devs now
+            #cover the weak directions too, so they grow.
+            linearSolverOptions.epsSVD = 1e-12
+            rval = calibrator.estimator.reoptimize()
+            if rval.numIterations == 0 or rval.numIterations >= optimizerOptions.maxIterations \
+                    or rval.JFinal > rval.JStart + optimizerOptions.convergenceDeltaJ:
+                sm.logError("Final optimization failed (J {0} -> {1} in {2} iterations)... restarting...".format(rval.JStart, rval.JFinal, rval.numIterations))
+                raise kcc.OptimizationDiverged
+            print("")
+            print("Final optimization: J {0:.1f} -> {1:.1f} in {2} iterations, {3:.1f} s (calibration rank {4}, deficiency {5})".format(rval.JStart, rval.JFinal, rval.numIterations, rval.elapsedTime, rval.rankTheta, rval.rankThetaDeficiency))
+
             #final output
             print("")
             print("")
