@@ -27,4 +27,6 @@
   <run_depend>incremental_calibration_python</run_depend>
   <run_depend>aslam_splines_python</run_depend>
 
+  <test_depend>python3-nose</test_depend>
+
 </package>

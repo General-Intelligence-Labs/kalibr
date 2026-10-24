@@ -53,6 +53,7 @@ if(CATKIN_ENABLE_TESTING)
     test/TestErrorTerms.cpp
     )
   target_link_libraries(${PROJECT_NAME}_test ${PROJECT_NAME}_errorterms)
+  catkin_add_nosetests(test/test_camera_calibration.py)
 endif()
 
 ##################################

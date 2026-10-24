@@ -272,9 +272,18 @@ class CameraCalibration(object):
     def addTargetView(self, timestamp, rig_observations, T_tc_guess, force=False):
         #create the problem for this batch and try to add it 
         batch_problem = CalibrationTargetOptimizationProblem.fromTargetViewObservations(self.cameras, self.target, self.baselines, timestamp, T_tc_guess, rig_observations, useBlakeZissermanMest=self.useBlakeZissermanMest)
+        batches_before = self.estimator.getNumBatches()
         self.estimator_return_value = self.estimator.addBatch(batch_problem, force)
         
         if self.estimator_return_value.numIterations >= self.optimizerOptions.maxIterations:
+            # addBatch restores the design variables and removes a rejected,
+            # non-forced batch. A bad new view must not discard an existing fit.
+            # First-view, forced, or retained non-convergent batches still fail.
+            if (not force and not self.estimator_return_value.batchAccepted
+                    and batches_before > 0
+                    and self.estimator.getNumBatches() == batches_before):
+                sm.logWarn("Rejected non-convergent view at {0}; retaining the previous estimate".format(timestamp))
+                return False
             sm.logError("Did not converge in maxIterations... restarting...")
             raise OptimizationDiverged
         
