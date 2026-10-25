@@ -31,6 +31,7 @@ class GridCalibrationTargetAprilgrid : public GridCalibrationTargetBase {
   struct AprilgridOptions {
     AprilgridOptions() :
       doSubpixRefinement(true),
+      subpixWindowHalfSize(2),
       maxSubpixDisplacement2(1.5),
       showExtractionVideo(false),
       minTagsForValidObs(4),
@@ -40,6 +41,9 @@ class GridCalibrationTargetAprilgrid : public GridCalibrationTargetBase {
     //options
     /// \brief subpixel refinement of extracted corners
     bool doSubpixRefinement;
+
+    /// Half width of the corner refinement neighborhood in pixels.
+    unsigned int subpixWindowHalfSize;
 
     /// \brief max. displacement squarred in subpixel refinement  [px^2]
     double maxSubpixDisplacement2;
@@ -57,7 +61,7 @@ class GridCalibrationTargetAprilgrid : public GridCalibrationTargetBase {
     unsigned int blackTagBorder;
 
     /// \brief Serialization support
-    enum {CLASS_SERIALIZATION_VERSION = 1};
+    enum {CLASS_SERIALIZATION_VERSION = 2};
     BOOST_SERIALIZATION_SPLIT_MEMBER();
     template<class Archive>
     void save(Archive & ar, const unsigned int /*version*/) const
@@ -68,9 +72,10 @@ class GridCalibrationTargetAprilgrid : public GridCalibrationTargetBase {
        ar << BOOST_SERIALIZATION_NVP(minTagsForValidObs);
        ar << BOOST_SERIALIZATION_NVP(minBorderDistance);
        ar << BOOST_SERIALIZATION_NVP(blackTagBorder);
+       ar << BOOST_SERIALIZATION_NVP(subpixWindowHalfSize);
     }
     template<class Archive>
-    void load(Archive & ar, const unsigned int /*version*/)
+    void load(Archive & ar, const unsigned int version)
     {
        ar >> BOOST_SERIALIZATION_NVP(doSubpixRefinement);
        ar >> BOOST_SERIALIZATION_NVP(maxSubpixDisplacement2);
@@ -78,6 +83,8 @@ class GridCalibrationTargetAprilgrid : public GridCalibrationTargetBase {
        ar >> BOOST_SERIALIZATION_NVP(minTagsForValidObs);
        ar >> BOOST_SERIALIZATION_NVP(minBorderDistance);
        ar >> BOOST_SERIALIZATION_NVP(blackTagBorder);
+       if (version >= 2) ar >> BOOST_SERIALIZATION_NVP(subpixWindowHalfSize);
+       else subpixWindowHalfSize = 2;
     }
   };
 

@@ -126,6 +126,28 @@ def getReprojectionErrorStatistics(all_rerrs):
     return mean, std
 
 #return a list (views) of a list (reprojection errors) for a cam
+def exportReprojectionDiagnostics(calibrator, filename):
+    import json
+    result = {}
+    for camera in range(len(calibrator.cameras)):
+        _, _, errors = getReprojectionErrors(calibrator, camera)
+        views, all_errors = [], []
+        for view, rows in zip(calibrator.views, errors):
+            if rows is None:
+                continue
+            values = np.asarray([row for row in rows if all(value is not None for value in row)], dtype=float)
+            if not len(values):
+                continue
+            norms = np.linalg.norm(values, axis=1)
+            all_errors.extend(norms.tolist())
+            views.append({'timestamp_s': float(view.timestamp), 'corners': len(values),
+                          'rms_px': float(np.sqrt(np.mean(norms**2))), 'max_px': float(np.max(norms))})
+        result['cam%d' % camera] = {'views': views, 'corners': len(all_errors),
+                                    'rms_px': float(np.sqrt(np.mean(np.square(all_errors)))) if all_errors else None}
+    with open(filename, 'w') as stream:
+        json.dump(result, stream, indent=2, allow_nan=False)
+
+
 def getReprojectionErrors(cself, cam_id):
     all_corners = list(); all_reprojections = list(); all_reprojection_errs =list()
     

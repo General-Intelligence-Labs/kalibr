@@ -10,6 +10,7 @@ BOOST_PYTHON_MODULE(libaslam_cameras_april_python)
   using namespace aslam::cameras;
 
   class_<GridCalibrationTargetAprilgrid::AprilgridOptions>("AprilgridOptions", init<>())
+    .def_readwrite("subpixWindowHalfSize", &GridCalibrationTargetAprilgrid::AprilgridOptions::subpixWindowHalfSize)
     .def_readwrite("doSubpixRefinement", &GridCalibrationTargetAprilgrid::AprilgridOptions::doSubpixRefinement)
     .def_readwrite("showExtractionVideo", &GridCalibrationTargetAprilgrid::AprilgridOptions::showExtractionVideo)
     .def_readwrite("minTagsForValidObs", &GridCalibrationTargetAprilgrid::AprilgridOptions::minTagsForValidObs)

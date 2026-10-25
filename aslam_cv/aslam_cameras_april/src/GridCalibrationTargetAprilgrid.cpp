@@ -218,7 +218,7 @@ bool GridCalibrationTargetAprilgrid::computeObservation(
   //optional subpixel refinement on all tag corners (four corners each tag)
   if (_options.doSubpixRefinement && success)
     cv::cornerSubPix(
-        image, tagCorners, cv::Size(2, 2), cv::Size(-1, -1),
+        image, tagCorners, cv::Size(_options.subpixWindowHalfSize, _options.subpixWindowHalfSize), cv::Size(-1, -1),
         cv::TermCriteria(cv::TermCriteria::Type::EPS + cv::TermCriteria::Type::MAX_ITER, 30, 0.1));
 
   if (_options.showExtractionVideo) {

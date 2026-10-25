@@ -91,6 +91,9 @@ def parseArgs():
     
     #optimization options
     groupOpt = parser.add_argument_group('Optimization options')
+    groupOpt.add_argument('--shared-camera-clock', action='store_true', help='Initialize all camera delays from camera0; keep every delay active during optimization')
+    groupOpt.add_argument('--max-reference-gap', type=float, default=0, help='Select the longest camera0 track with no observation gap above this many seconds (0 disables)')
+    groupOpt.add_argument('--min-track-duration', type=float, default=20, help='Minimum duration of the selected reference track in seconds')
     groupOpt.add_argument('--no-time-calibration', action='store_true', dest='no_time', help='Disable the temporal calibration', required=False)      
     groupOpt.add_argument('--max-iter', type=int, default=30, dest='max_iter', help='Max. iterations (default: %(default)s)', required=False)
     groupOpt.add_argument('--recover-covariance', action='store_true', dest='recover_cov', help='Recover the covariance of the design variables.', required=False)
@@ -173,6 +176,30 @@ def main():
     chain.printDetails()   
     camChain = sens.IccCameraChain(chain, targetConfig, parsed)
 
+    if parsed.max_reference_gap:
+        from kalibr_imu_camera_calibration.reference_track import select_interval
+        start, end = select_interval([obs.time().toSec() for obs in camChain.camList[0].targetObservations],
+                                     parsed.max_reference_gap, parsed.min_track_duration,
+                                     [[obs.time().toSec() for obs in camera.targetObservations] for camera in camChain.camList],
+                                     (max(imu.imuData[0].stamp.toSec() for imu in imus),
+                                      min(imu.imuData[-1].stamp.toSec() for imu in imus)))
+        for camera in camChain.camList:
+            camera.targetObservations = [obs for obs in camera.targetObservations
+                                         if start <= obs.time().toSec() <= end]
+            if len(camera.targetObservations) < 3:
+                raise ValueError('Selected reference interval has fewer than three board views in a camera')
+        for imu in imus:
+            imu.imuData = [sample for sample in imu.imuData if start <= sample.stamp.toSec() <= end]
+            if len(imu.imuData) < 2:
+                raise ValueError('Selected reference interval has no usable IMU data')
+        import json
+        with open(os.path.splitext(parsed.bagfile[0])[0] + '-interval.json', 'w') as stream:
+            json.dump({'start_s': start, 'end_s': end, 'duration_s': end-start,
+                       'max_reference_gap_s': parsed.max_reference_gap,
+                       'camera_observations': [len(c.targetObservations) for c in camChain.camList],
+                       'imu_samples': [len(i.imuData) for i in imus]}, stream, indent=2)
+        print('Shared absolute observation interval:', start, end)
+
     #create a calibrator instance
     iCal = IccCalibrator()
 
@@ -197,7 +224,8 @@ def main():
                       noChainExtrinsics=(not parsed.recompute_chain_extrinsics),
                       maxIterations=parsed.max_iter,
                       timeOffsetPadding=parsed.timeoffset_padding,
-                      verbose = parsed.verbose)
+                      verbose = parsed.verbose,
+                      sharedCameraClock=parsed.shared_camera_clock)
 
     print("")
     print("Before Optimization")

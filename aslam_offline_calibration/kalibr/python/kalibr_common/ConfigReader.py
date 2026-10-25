@@ -619,7 +619,11 @@ class CalibrationTargetParameters(ParametersBase):
             if not isinstance(tagSpacing,float) or tagSpacing <= 0.0:
                 errList.append("invalid tagSpacing (float)")
                 
-            targetParams = {'tagRows': tagRows,
+            window = self.data.get('subpixWindowHalfSize', 2)
+            if type(window) is not int or not 1 <= window <= 10:
+                self.raiseError('subpixWindowHalfSize must be an integer from 1 to 10')
+            targetParams = {'subpixWindowHalfSize': window,
+                            'tagRows': tagRows,
                             'tagCols': tagCols,
                             'tagSize': tagSize,
                             'tagSpacing': tagSpacing,

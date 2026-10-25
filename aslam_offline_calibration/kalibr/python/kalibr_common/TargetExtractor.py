@@ -3,33 +3,23 @@ import sm
 import numpy as np
 import sys
 import multiprocessing
-try:
-   import queue
-except ImportError:
-   import Queue as queue # python 2.x
-import time
+from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 import copy
 import cv2
 
-def multicoreExtractionWrapper(detector, taskq, resultq, clearImages, noTransformation):    
-    while 1:
-        try:
-            task = taskq.get_nowait()
-        except queue.Empty:
-            return
-        idx = task[0]
-        stamp = task[1]
-        image = task[2]
-        
-        if noTransformation:
-            success, obs = detector.findTargetNoTransformation(stamp, np.array(image))
-        else:
-            success, obs = detector.findTarget(stamp, np.array(image))
-            
-        if clearImages:
-            obs.clearImage()
-        if success:
-            resultq.put( (obs, idx) )
+def _initialize_worker(detector, clear_images, no_transformation):
+    global _worker_detector, _clear_images, _no_transformation
+    _worker_detector, _clear_images, _no_transformation = detector, clear_images, no_transformation
+
+
+def _extract_task(task):
+    index, (stamp, image) = task
+    method = _worker_detector.findTargetNoTransformation if _no_transformation else _worker_detector.findTarget
+    success, observation = method(stamp, np.asarray(image))
+    if _clear_images:
+        observation.clearImage()
+    return index, observation if success else None
+
 
 def extractCornersFromDataset(dataset, detector, multithreading=False, numProcesses=None, clearImages=True, noTransformation=False):
     print("Extracting calibration target corners")    
@@ -43,48 +33,30 @@ def extractCornersFromDataset(dataset, detector, multithreading=False, numProces
     if multithreading:   
         if not numProcesses:
             numProcesses = max(1,multiprocessing.cpu_count()-1)
-        try:      
-            manager = multiprocessing.Manager()
-            resultq = manager.Queue()
-            manager2 = multiprocessing.Manager()
-            taskq = manager2.Queue()
-            
-            for idx, (timestamp, image) in enumerate(dataset.readDataset()):
-                taskq.put( (idx, timestamp, image) )
-                
-            plist=list()
-            for pidx in range(0, numProcesses):
-                detector_copy = copy.copy(detector)
-                p = multiprocessing.Process(target=multicoreExtractionWrapper, args=(detector_copy, taskq, resultq, clearImages, noTransformation, ))
-                p.start()
-                plist.append(p)
-            
-            #wait for results
-            last_done=0
-            while 1:
-                if all([not p.is_alive() for p in plist]):
-                    time.sleep(0.1)
-                    break
-                done = numImages-taskq.qsize()
-                sys.stdout.flush()
-                if (done-last_done) > 0:
-                    iProgress.sample(done-last_done)
-                last_done = done
-                time.sleep(0.5)
-            resultq.put('STOP')
-        except Exception as e:
-            raise RuntimeError("Exception during multithreaded extraction: {0}".format(e))
-        
-        #get result sorted by time (=idx)
-        if resultq.qsize() > 1:
-            targetObservations = [[]]*(resultq.qsize()-1)
-            for lidx, data in enumerate(iter(resultq.get, 'STOP')):
-                obs=data[0]; time_idx = data[1]
-                targetObservations[lidx] = (time_idx, obs)
-            targetObservations = list(zip(*sorted(targetObservations, key=lambda tup: tup[0])))[1]
-        else:
-            targetObservations=[]
-    
+        tasks = iter(enumerate(dataset.readDataset()))
+        # Limit outstanding decoded images as well as workers. A full queue of
+        # 1080p images can exhaust a station before any extraction starts.
+        with ProcessPoolExecutor(max_workers=numProcesses,
+                                 mp_context=multiprocessing.get_context('fork'),
+                                 initializer=_initialize_worker,
+                                 initargs=(copy.copy(detector), clearImages, noTransformation)) as pool:
+            pending = set()
+            for _ in range(2 * numProcesses):
+                task = next(tasks, None)
+                if task is not None:
+                    pending.add(pool.submit(_extract_task, task))
+            while pending:
+                finished, pending = wait(pending, return_when=FIRST_COMPLETED)
+                for future in finished:
+                    index, observation = future.result()
+                    if observation is not None:
+                        targetObservations.append((index, observation))
+                    iProgress.sample()
+                    task = next(tasks, None)
+                    if task is not None:
+                        pending.add(pool.submit(_extract_task, task))
+        targetObservations = [obs for _, obs in sorted(targetObservations, key=lambda pair: pair[0])]
+
     #single threaded implementation
     else:
         for timestamp, image in dataset.readDataset():

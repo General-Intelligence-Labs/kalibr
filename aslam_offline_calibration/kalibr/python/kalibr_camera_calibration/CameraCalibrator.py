@@ -28,13 +28,21 @@ LANDMARK_GROUP_ID = 2
 class OptimizationDiverged(Exception):
     pass
 
+
+def camerasReadyForOutlierFiltering(views, minimumViews):
+    from collections import Counter
+    counts = Counter(camera for view in views for camera, errors in view.rerrs.items()
+                     if any(error is not None for error in errors))
+    return {camera for camera, count in counts.items() if count >= minimumViews}
+
+
 class CameraGeometry(object):
     def __init__(self, cameraModel, targetConfig, dataset, geometry=None, verbose=False):
         self.dataset = dataset
         
         self.model = cameraModel
-        if geometry is None:
-            self.geometry = cameraModel.geometry()
+        self.fixedIntrinsics = geometry is not None
+        self.geometry = geometry if geometry is not None else cameraModel.geometry()
         
         if not type(self.geometry) == cameraModel.geometry:
             raise RuntimeError("The type of geometry passed in \"%s\" does not match the model type \"%s\"" % (type(geometry),type(cameraModel.geometry)))
@@ -48,11 +56,16 @@ class CameraGeometry(object):
         self.ctarget = TargetDetector(targetConfig, self.geometry, showCorners=verbose)
 
     def setDvActiveStatus(self, projectionActive, distortionActive, shutterActice):
+        if self.fixedIntrinsics:
+            projectionActive = distortionActive = shutterActice = False
         self.dv.projectionDesignVariable().setActive(projectionActive)
         self.dv.distortionDesignVariable().setActive(distortionActive)
         self.dv.shutterDesignVariable().setActive(shutterActice)
 
     def initGeometryFromObservations(self, observations):
+        if self.fixedIntrinsics:
+            self.isGeometryInitialized = bool(observations)
+            return self.isGeometryInitialized
         #obtain focal length guess
         success = self.geometry.initializeIntrinsics(observations)
         if not success:
@@ -107,6 +120,7 @@ class TargetDetector(object):
          
         elif targetType == 'aprilgrid':
             options = acv_april.AprilgridOptions()
+            options.subpixWindowHalfSize = targetParams["subpixWindowHalfSize"]
             #enforce more than one row --> pnp solution can be bad if all points are almost on a line...
             options.minTagsForValidObs = int( np.max( [targetParams['tagRows'], targetParams['tagCols']] ) + 1 )
             options.showExtractionVideo = showCorners

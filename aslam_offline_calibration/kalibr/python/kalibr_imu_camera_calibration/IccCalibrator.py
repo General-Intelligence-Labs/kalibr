@@ -78,7 +78,8 @@ class IccCalibrator(object):
                       gyroNoiseScale=1.0,
                       accelNoiseScale=1.0,
                       timeOffsetPadding=0.02,
-                      verbose=False  ):
+                      verbose=False,
+                      sharedCameraClock=False  ):
 
         print("\tSpline order: %d" % (splineOrder))
         print("\tPose knots per second: %d" % (poseKnotsPerSecond))
@@ -101,8 +102,11 @@ class IccCalibrator(object):
         #estimate the timeshift for all cameras to the main imu
         self.noTimeCalibration = noTimeCalibration
         if not noTimeCalibration:
-            for cam in self.CameraChain.camList:
-                cam.findTimeshiftCameraImuPrior(self.ImuList[0], verbose)
+            for index, cam in enumerate(self.CameraChain.camList):
+                if sharedCameraClock and index:
+                    cam.timeshiftCamToImuPrior = self.CameraChain.camList[0].timeshiftCamToImuPrior
+                else:
+                    cam.findTimeshiftCameraImuPrior(self.ImuList[0], verbose)
         
         #obtain orientation prior between main imu and camera chain (if no external input provided)
         #and initial estimate for the direction of gravity

@@ -94,6 +94,8 @@ def parseArgs():
     groupTarget.add_argument('--approx-sync', dest='max_delta_approxsync', type=float, default=0.02, help='Time tolerance for approximate image synchronization [s] (default: %(default)s)')
     
     groupCalibrator = parser.add_argument_group('Calibrator settings')
+    groupCalibrator.add_argument('--fixed-intrinsics', help='Camchain whose lens parameters remain fixed; estimate only rig extrinsics and target poses')
+    groupCalibrator.add_argument('--seed', type=int, default=123, help='Seed for reproducible view shuffling')
     groupCalibrator.add_argument('--qr-tol', type=float, default=0.02, dest='qrTol', help='The tolerance on the factors of the QR decomposition (default: %(default)s)')
     groupCalibrator.add_argument('--mi-tol', type=float, default=0.2, dest='miTol', help='The tolerance on the mutual information for adding an image. Higher means fewer images will be added. Use -1 to force all images. (default: %(default)s)')
     groupCalibrator.add_argument('--no-shuffle', action='store_true', dest='noShuffle', help='Do not shuffle the dataset processing order')
@@ -101,7 +103,7 @@ def parseArgs():
     outlierSettings = parser.add_argument_group('Outlier filtering options')
     outlierSettings.add_argument('--no-outliers-removal', action='store_false', default=True, dest='removeOutliers', help='Disable corner outlier filtering')
     outlierSettings.add_argument('--no-final-filtering', action='store_false', default=True, dest='allowEndFiltering', help='Disable filtering after all views have been processed.')
-    outlierSettings.add_argument('--min-views-outlier', type=int, default=20, dest='minViewOutlier', help='Number of raw views to initialize statistics (default: %(default)s)')
+    outlierSettings.add_argument('--min-views-outlier', type=int, default=20, dest='minViewOutlier', help='Observed views per camera to initialize outlier statistics (default: %(default)s)')
     outlierSettings.add_argument('--use-blakezisserman', action='store_true', dest='doBlakeZisserman', help='Enable the Blake-Zisserman m-estimator')
     outlierSettings.add_argument('--plot-outliers', action='store_true', dest='doPlotOutliers', help='Plot the detect outliers during extraction (this could be slow)')
     
@@ -142,6 +144,8 @@ def parseArgs():
 
 def main():
     parsed = parseArgs()
+    random.seed(parsed.seed)
+    np.random.seed(parsed.seed)
     
     #logging modes
     if parsed.verbose:
@@ -157,6 +161,9 @@ def main():
     #create camera objects, initialize the intrinsics and extract targets
     cameraList = list()
     numCams = len(parsed.topics)
+    fixed = kc.CameraChainParameters(parsed.fixed_intrinsics) if parsed.fixed_intrinsics else None
+    if fixed and fixed.numCameras() != numCams:
+        raise ValueError('Fixed intrinsics must contain exactly one camera per topic')
 
     obsdb = kcc.ObservationDatabase(parsed.max_delta_approxsync)
         
@@ -172,7 +179,14 @@ def main():
         
             #create camera
             cameraModel = cameraModels[modelName]
-            cam = kcc.CameraGeometry(cameraModel, targetConfig, dataset, verbose=(parsed.verbose or parsed.showextraction))
+            geometry = None
+            if fixed:
+                parameters = fixed.getCameraParameters(cam_id)
+                if parameters.getRosTopic() != topic:
+                    raise ValueError('Fixed intrinsics topic does not match camera order')
+                geometry = kc.ConfigReader.AslamCamera.fromParameters(parameters).geometry
+            cam = kcc.CameraGeometry(cameraModel, targetConfig, dataset, geometry=geometry,
+                                     verbose=(parsed.verbose or parsed.showextraction))
                 
             #extract the targets
             multithreading = not (parsed.verbose or parsed.showextraction)
@@ -180,6 +194,11 @@ def main():
                                                         multithreading=multithreading, clearImages=False,
                                                         noTransformation=True)
             
+            if fixed:
+                width, height = parameters.getResolution()
+                if any(obs.imCols() != width or obs.imRows() != height for obs in observations):
+                    raise ValueError('Fixed intrinsics resolution differs from recorded images')
+
             #populate the database
             for obs in observations:
                 obsdb.addObservation(cam_id, obs)
@@ -209,9 +228,9 @@ def main():
        
     #loop to restart the optimization
     restartAttempts=3
-    initOutlierRejection=True
-    removedOutlierCorners=list() 
+    removedOutlierCorners=list()
     while True:
+        initializedOutlierCameras=set()
         try:
             #compute initial guesses for the baselines, intrinsics
             print("initializing initial guesses")
@@ -303,15 +322,15 @@ def main():
                 
                 # Look for outliers
                 runEndFiltering = view_id==(len(timestamps)-1) and parsed.allowEndFiltering # run another filtering step at the end (over all batches)
-                numActiveBatches = calibrator.estimator.getNumBatches()
-                if ((success and numActiveBatches>parsed.minViewOutlier*numCams) or (runEndFiltering and numActiveBatches>parsed.minViewOutlier*numCams)) and parsed.removeOutliers: 
+                eligible_cameras = kcc.camerasReadyForOutlierFiltering(calibrator.views, parsed.minViewOutlier)
+                if (success or runEndFiltering) and eligible_cameras and parsed.removeOutliers:
                     #create the list of the batches to check               
-                    if initOutlierRejection:
+                    if eligible_cameras - initializedOutlierCameras:
                         #check all views after the min. number of batches has been reached
                         batches_to_check=list(range(0, calibrator.estimator.getNumBatches()))
                         print("");print("")
                         print("Filtering outliers in all batches...")
-                        initOutlierRejection=False
+                        initializedOutlierCameras.update(eligible_cameras)
                         progress_filter = sm.Progress2(len(batches_to_check)); progress_filter.sample()
                     elif runEndFiltering:
                         #check all batches again after all views have been processed
@@ -332,6 +351,8 @@ def main():
                         cornerRemovalList_allCams=list()
                         camerasInBatch = list(calibrator.views[batch_id].rerrs.keys())
                         for cidx in camerasInBatch:
+                            if cidx not in eligible_cameras:
+                                continue
                             
                             #calculate the reprojection errors statistics
                             corners, reprojs, rerrs = kcc.getReprojectionErrors(calibrator, cidx)        
@@ -434,6 +455,8 @@ def main():
             kcc.saveResultTxt(calibrator, filename=resultFileTxt)
             print("  Detailed results written to file: {0}".format(resultFileTxt))
             
+            kcc.exportReprojectionDiagnostics(calibrator, bagtag + "-camera-diagnostics.json")
+
             #generate report
             print("")
             print("Generating result report...")
@@ -459,7 +482,7 @@ def main():
             
             if restartAttempts==0:
                 sm.logError("Max. attemps reached... Giving up...")
-                break
+                sys.exit(2)
             else:
                 sm.logWarn("Restarting for a new attempt...")    
                 
