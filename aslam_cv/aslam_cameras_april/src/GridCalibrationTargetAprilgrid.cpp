@@ -318,8 +318,10 @@ bool GridCalibrationTargetAprilgrid::computeObservation(
     }
   }
 
-  //succesful observation
-  return success;
+  // Tag count was checked before refinement. Rejected subpixel displacements
+  // can leave fewer correspondences than the pose initializer's DLT requires.
+  // Reject this observation here instead of crashing the extraction worker.
+  return success && std::count(outCornerObserved.begin(), outCornerObserved.end(), true) >= MINIMUM_POSE_CORNERS;
 }
 
 }  // namespace cameras

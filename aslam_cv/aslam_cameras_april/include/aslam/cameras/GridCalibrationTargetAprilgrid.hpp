@@ -27,6 +27,8 @@ class GridCalibrationTargetAprilgrid : public GridCalibrationTargetBase {
   typedef boost::shared_ptr<GridCalibrationTargetAprilgrid> Ptr;
   typedef boost::shared_ptr<const GridCalibrationTargetAprilgrid> ConstPtr;
 
+  enum { MINIMUM_POSE_CORNERS = 6 };
+
   //target extraction options
   struct AprilgridOptions {
     AprilgridOptions() :

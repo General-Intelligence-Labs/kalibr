@@ -9,6 +9,8 @@ BOOST_PYTHON_MODULE(libaslam_cameras_april_python)
   using namespace boost::python;
   using namespace aslam::cameras;
 
+  scope().attr("MINIMUM_POSE_CORNERS") = int(GridCalibrationTargetAprilgrid::MINIMUM_POSE_CORNERS);
+
   class_<GridCalibrationTargetAprilgrid::AprilgridOptions>("AprilgridOptions", init<>())
     .def_readwrite("subpixWindowHalfSize", &GridCalibrationTargetAprilgrid::AprilgridOptions::subpixWindowHalfSize)
     .def_readwrite("doSubpixRefinement", &GridCalibrationTargetAprilgrid::AprilgridOptions::doSubpixRefinement)

@@ -92,7 +92,7 @@ def parseArgs():
     #optimization options
     groupOpt = parser.add_argument_group('Optimization options')
     groupOpt.add_argument('--shared-camera-clock', action='store_true', help='Initialize all camera delays from camera0; keep every delay active during optimization')
-    groupOpt.add_argument('--max-reference-gap', type=float, default=0, help='Select the longest camera0 track with no observation gap above this many seconds (0 disables)')
+    groupOpt.add_argument('--max-reference-gap', type=float, default=2.0, help='Select the longest camera0 track with no observation gap above this many seconds (default: %(default)s; 0 disables for diagnostics)')
     groupOpt.add_argument('--min-track-duration', type=float, default=20, help='Minimum duration of the selected reference track in seconds')
     groupOpt.add_argument('--no-time-calibration', action='store_true', dest='no_time', help='Disable the temporal calibration', required=False)      
     groupOpt.add_argument('--max-iter', type=int, default=30, dest='max_iter', help='Max. iterations (default: %(default)s)', required=False)

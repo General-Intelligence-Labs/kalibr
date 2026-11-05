@@ -14,11 +14,63 @@ calibration = importlib.import_module('kalibr_camera_calibration.CameraCalibrato
 
 
 class StationCalibration(unittest.TestCase):
+    def test_observation_rejected_when_refinement_removes_pose_correspondences(self):
+        import cv2
+        import numpy as np
+        import aslam_cv as acv
+        dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_APRILTAG_36h11)
+        image = np.full((240, 240), 255, dtype=np.uint8)
+        for index in range(4):
+            x, y = 30 + (index % 2)*100, 30 + (index // 2)*100
+            image[y:y+80, x:x+80] = cv2.aruco.drawMarker(dictionary, index, 80, borderBits=2)
+        camera = kc.AslamCamera('pinhole', [300, 300, 120, 120],
+                                'radtan', [0, 0, 0, 0], [240, 240])
+        def detector(displacement):
+            options = april.AprilgridOptions()
+            options.maxSubpixDisplacement2 = displacement
+            grid = april.GridCalibrationTargetAprilgrid(2, 2, .0352, .3, options)
+            return acv.GridDetector(camera.geometry, grid, acv.GridDetectorOptions())
+        found, observation = detector(1.5).findTargetNoTransformation(acv.Time(0, 0), image.copy())
+        self.assertTrue(found)
+        self.assertGreaterEqual(len(observation.getCornersIdx()), april.MINIMUM_POSE_CORNERS)
+        # Force every refinement candidate to be removed, independently of its
+        # subpixel displacement. Raw tag detection still succeeds on this image.
+        found, observation = detector(-1).findTargetNoTransformation(acv.Time(0, 0), image.copy())
+        self.assertFalse(found)
+        self.assertFalse(detector(-1).findTarget(acv.Time(0, 0), image.copy())[0])
+
     def test_window_default_and_serialization(self):
         options = april.AprilgridOptions()
         self.assertEqual(options.subpixWindowHalfSize, 2)
         options.subpixWindowHalfSize = 5
         self.assertEqual(pickle.loads(pickle.dumps(options)).subpixWindowHalfSize, 5)
+
+    def test_pose_initializer_rejects_too_few_usable_backprojections(self):
+        import numpy as np
+        import aslam_cv as acv
+        grid = april.GridCalibrationTargetAprilgrid(3, 3, .0352, .3)
+        camera = kc.AslamCamera('pinhole', [300, 300, 120, 120],
+                                'radtan', [0, 0, 0, 0], [240, 240])
+        for count in (4, 5):
+            observation = acv.GridCalibrationTargetObservation(grid)
+            for index in range(count):
+                observation.updateImagePoint(index, np.array([60.+index*12, 100.]))
+            # Correspondences are collinear, so iterative PnP would enter its
+            # six-point DLT initializer instead of a planar homography.
+            self.assertFalse(camera.geometry.estimateTransformation(observation)[0])
+
+    def test_reference_track_guard_enabled_for_legacy_cli(self):
+        import runpy
+        import sys
+        from unittest.mock import patch
+        script = pathlib.Path(__file__).parents[1] / 'python/kalibr_calibrate_imu_camera'
+        parse = runpy.run_path(str(script), run_name='kalibr_imu_cli')['parseArgs']
+        args = [str(script), '--bag', '/tmp/test.bag', '--cams', '/tmp/cams.yaml',
+                '--imu', '/tmp/imu.yaml', '--target', '/tmp/target.yaml']
+        with patch.object(sys, 'argv', args):
+            self.assertEqual(parse().max_reference_gap, 2.)
+        with patch.object(sys, 'argv', args + ['--max-reference-gap', '0']):
+            self.assertEqual(parse().max_reference_gap, 0.)
 
     def test_target_window_validation(self):
         with tempfile.TemporaryDirectory() as directory:

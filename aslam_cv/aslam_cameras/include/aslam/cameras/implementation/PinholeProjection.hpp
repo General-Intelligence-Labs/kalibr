@@ -873,7 +873,9 @@ bool PinholeProjection<DISTORTION_T>::estimateTransformation(
   cv::Mat rvec(3, 1, CV_64F);
   cv::Mat tvec(3, 1, CV_64F);
 
-  if (Ps.size() < 4)
+  // Backprojection can discard additional corners after target extraction.
+  // OpenCV's iterative initializer may select DLT, which requires six pairs.
+  if (Ps.size() < 6)
     return false;
 
   // Call the OpenCV pnp function.
